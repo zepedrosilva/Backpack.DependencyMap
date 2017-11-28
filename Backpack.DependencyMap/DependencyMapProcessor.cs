@@ -1,31 +1,33 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text.RegularExpressions;
 using Backpack.DependencyMap.PostProcessors;
 using Backpack.DependencyMap.PreProcessors;
 using Backpack.DependencyMap.Processors;
 using log4net;
-using Neo4jClient;
-using Neo4jClient.Transactions;
+using System.Collections.Concurrent;
+using System.Threading.Tasks;
+using System.Diagnostics;
+using Backpack.DependencyMap.Finders;
+using Backpack.DependencyMap.Brokers;
 
 namespace Backpack.DependencyMap
 {
     public class DependencyMapProcessor
     {
-        private static readonly ILog Log = LogManager.GetLogger(typeof(DependencyMapProcessor));
-
+        private readonly ILog _logger;
         private readonly ApplicationArguments _arguments;
-        private readonly IGraphClientFactory _graphClientFactory;
-        private readonly IEnumerable<IPreProcessor> _preProcessors;
-        private readonly IEnumerable<IProcessor> _processors;
-        private readonly IEnumerable<IPostProcessor> _postProcessors;
+        private readonly IFileFinder _finder;
+        private readonly IFileBroker _broker;
+        private readonly IPreProcessor[] _preProcessors;
+        private readonly IProcessor[] _processors;
+        private readonly IPostProcessor[] _postProcessors;
 
-        public DependencyMapProcessor(ApplicationArguments arguments, IGraphClientFactory graphClientFactory, IEnumerable<IPreProcessor> preProcessors, IEnumerable<IProcessor> processors, IEnumerable<IPostProcessor> postProcessors)
+        public DependencyMapProcessor(ApplicationArguments arguments, IFileFinder finder, IFileBroker broker, IPreProcessor[] preProcessors, IProcessor[] processors, IPostProcessor[] postProcessors)
         {
+            _logger = LogManager.GetLogger(typeof(DependencyMapProcessor));
             _arguments = arguments;
-            _graphClientFactory = graphClientFactory;
+            _finder = finder;
+            _broker = broker;
             _preProcessors = preProcessors;
             _processors = processors;
             _postProcessors = postProcessors;
@@ -33,80 +35,43 @@ namespace Backpack.DependencyMap
 
         public void Start()
         {
-            using (var client = (ITransactionalGraphClient) _graphClientFactory.Create())
-            {
-                //using (var tx = client.BeginTransaction())
-                //{
-                    RunPreProcessingTasks(client);
-                    ProcessFiles(client);
-                    RunPostProcessingTasks(client);
+            var stopwatch = new Stopwatch();
+            stopwatch.Start();
 
-                    //tx.Commit();
-                //}
-            }
-        }
-
-        private void RunPreProcessingTasks(ITransactionalGraphClient client)
-        {
-            Log.Info("Running pre processing tasks");
+            // Execute all pre processors synchronously
 
             foreach (var preProcessor in _preProcessors)
             {
-                preProcessor.Process(client);
+                preProcessor.Run();
             }
-        }
 
-        private void ProcessFiles(ITransactionalGraphClient client)
-        {
-            var filePattern = "(" + string.Join("|", _processors.Select(p => p.FilePattern)) + ")";
-            if (!string.IsNullOrWhiteSpace(_arguments.Filter))
-                filePattern = _arguments.Filter + ".*" + filePattern;
+            // Find the appropriate files based on the file patterns handled in the file processors and process them in paralell
 
-            Log.InfoFormat("Finding files with the pattern: {0}", filePattern);
+            var queue = new BlockingCollection<string>();
 
-            var searchPattern = new Regex(filePattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-            var searchOption = _arguments.Recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+            var tasks = new List<Task> {
+                Task.Factory.StartNew(() => _finder.FindFiles(_processors, queue))
+            };
 
-            Regex excludePattern = null;
-            if (!string.IsNullOrWhiteSpace(_arguments.Exclude))
-                excludePattern = new Regex(_arguments.Exclude, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-            foreach (var file in Directory.EnumerateFiles(_arguments.Path, "*", searchOption).Where(file => searchPattern.IsMatch(file)))
+            for (var cores = 0; cores < Environment.ProcessorCount; cores++)
             {
-                if (excludePattern != null && excludePattern.IsMatch(file))
-                {
-                    Log.InfoFormat("Skipping {0}", file);
-                    continue;
-                }
-
-                var processor = _processors.FirstOrDefault(p => p.IsProcessorFor(file));
-                if (processor != null)
-                {
-                    Log.InfoFormat("Processing {0}", file);
-                    try
-                    {
-                        processor.Process(file, client);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error(ex);
-                    }
-                }
-                else
-                {
-                    Log.WarnFormat("No processor found for file: {0}", file);
-                }
+                tasks.Add(Task.Factory.StartNew(() => _broker.Process(_processors, queue)));
             }
-        }
 
-        private void RunPostProcessingTasks(ITransactionalGraphClient client)
-        {
-            Log.Info("Running post processing tasks");
+            Task.WaitAll(tasks.ToArray());
+
+            // When all files are processed, execute the post processors synchronously
 
             foreach (var postProcessor in _postProcessors)
             {
-                postProcessor.Process(client);
+                postProcessor.Run();
             }
+
+            // Done
+
+            stopwatch.Stop();
+
+            _logger.InfoFormat("\nDone! Elapsed time: {0} second(s)", TimeSpan.FromMilliseconds(stopwatch.ElapsedMilliseconds).Seconds);
         }
     }
 }

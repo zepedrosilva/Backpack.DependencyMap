@@ -3,21 +3,21 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using log4net;
-using Neo4jClient.Transactions;
 using Onion.SolutionParser.Parser;
+using Neo4jClient;
 
 namespace Backpack.DependencyMap.Processors
 {
     [DebuggerDisplay("Pattern: {" + nameof(FilePattern) + "}")]
     public class SolutionFileProcessor : IProcessor
     {
-        private static readonly ILog Log = LogManager.GetLogger(typeof(SolutionFileProcessor));
         private readonly Regex _regex;
+        private readonly IGraphClient _client;
 
-        public SolutionFileProcessor()
+        public SolutionFileProcessor(IGraphClient client)
         {
             _regex = new Regex(FilePattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            _client = client;
         }
 
         public string FilePattern => @"\.sln";
@@ -27,10 +27,8 @@ namespace Backpack.DependencyMap.Processors
             return _regex.IsMatch(file);
         }
 
-        public void Process(string filePath, ITransactionalGraphClient client)
+        public void Process(string filePath)
         {
-            Log.InfoFormat("Proce[s]sing file: {0}", filePath);
-
             // Get the solution name
             var solution = new FileInfo(filePath).Name.Replace(".sln", "");
 
@@ -40,7 +38,7 @@ namespace Backpack.DependencyMap.Processors
             {
                 foreach (var project in solutionFile.Projects)
                 {
-                    client.Cypher
+                    _client.Cypher
                         .Merge("(solution:Solution {name:{solutionName}})")
                         .Merge("(project:Project {name:{projectName}})")
                         .Merge("(solution)-[:REFERENCES]->(project)")

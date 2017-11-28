@@ -5,20 +5,20 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using log4net;
-using Neo4jClient.Transactions;
+using Neo4jClient;
 
 namespace Backpack.DependencyMap.Processors
 {
     [DebuggerDisplay("Pattern: {" + nameof(FilePattern) + "}")]
     public class ProjectFileProcessor : IProcessor
     {
-        private static readonly ILog Log = LogManager.GetLogger(typeof(ProjectFileProcessor));
         private readonly Regex _regex;
+        private readonly IGraphClient _client;
 
-        public ProjectFileProcessor()
+        public ProjectFileProcessor(IGraphClient client)
         {
             _regex = new Regex(FilePattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            _client = client;
         }
 
         public string FilePattern => @"\.csproj$";
@@ -30,10 +30,8 @@ namespace Backpack.DependencyMap.Processors
 
         private static readonly Regex HintPathRegex = new Regex(@"^(?>\.\.\\)+(?>packages)\\(([a-zA-Z][a-zA-Z0-9_-]+\.?)+)\.((\d+\.?){1,})(-\\[a-zA-Z0-9_-]+)?", RegexOptions.Compiled);
 
-        public void Process(string filePath, ITransactionalGraphClient client)
+        public void Process(string filePath)
         {
-            Log.InfoFormat("Pro[c]essing file: {0}", filePath);
-
             var xml = XDocument.Load(filePath);
 
             // Get the project name
@@ -51,11 +49,10 @@ namespace Backpack.DependencyMap.Processors
                 {
                     var dependencyName = proj.Value;
 
-                    client.Cypher
+                    _client.Cypher
                         .Merge("(project:Project {name:{projectFile}})")
                         .Merge("(dependency:Project {name:{dependencyName}})")
                         .Merge("(project)-[:DEPENDS_ON]->(dependency)")
-                        //.Merge("(dependency)-[:IS_REFERENCED_BY]->(project)")
                         .WithParams(new Dictionary<string, object> {
                             { "projectFile", project },
                             { "dependencyName", dependencyName }
@@ -78,13 +75,12 @@ namespace Backpack.DependencyMap.Processors
                     var packageId = match.Groups[1].Value;
                     var packageVersion = match.Groups[3].Value;
 
-                    client.Cypher
+                    _client.Cypher
                         .Merge("(project:Project {name:{projectFile}})")
                         .Merge("(package:Package {name:{name}})")
                         .Merge("(version:PackageVersion {version:{version}, name:{name}})")
                         .Merge("(package)-[:HAS_VERSION]->(version)")
                         .Merge("(project)-[:DEPENDS_ON]->(version)")
-                        //.Merge("(version)-[:IS_REFERENCED_BY]->(project)")
                         .WithParams(new Dictionary<string, object> {
                             { "name", packageId },
                             { "version", packageVersion },

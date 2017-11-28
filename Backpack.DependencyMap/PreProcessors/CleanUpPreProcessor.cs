@@ -1,27 +1,28 @@
 ﻿using log4net;
-using Neo4jClient.Transactions;
+using Neo4jClient;
 
 namespace Backpack.DependencyMap.PreProcessors
 {
     public class CleanUpPreProcessor : IPreProcessor
     {
-        private static readonly ILog Log = LogManager.GetLogger(typeof(CleanUpPreProcessor));
-
+        private readonly ILog _logger;
         private readonly ApplicationArguments _arguments;
+        private readonly IGraphClient _client;
 
-        public CleanUpPreProcessor(ApplicationArguments arguments)
+        public CleanUpPreProcessor(ApplicationArguments arguments, IGraphClient client)
         {
+            _logger = LogManager.GetLogger(typeof(CleanUpPreProcessor));
             _arguments = arguments;
+            _client = client;
         }
 
-        public void Process(ITransactionalGraphClient client)
+        public void Run()
         {
             if (_arguments.CleanDatabase)
             {
-                if (Log.IsInfoEnabled)
-                    Log.Info("Cleaning up the database");
+                _logger.Info("Cleaning the database");
 
-                client.Cypher.Match("(n)")
+                _client.Cypher.Match("(n)")
                     .DetachDelete("n")
                     .ExecuteWithoutResults();
             }

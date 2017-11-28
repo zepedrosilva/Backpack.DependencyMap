@@ -4,20 +4,20 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using log4net;
-using Neo4jClient.Transactions;
+using Neo4jClient;
 
 namespace Backpack.DependencyMap.Processors
 {
     [DebuggerDisplay("Pattern: {" + nameof(FilePattern) + "}")]
     public class PackageSpecificationFileProcessor : IProcessor
     {
-        private static readonly ILog Log = LogManager.GetLogger(typeof(PackageSpecificationFileProcessor));
         private readonly Regex _regex;
+        private readonly IGraphClient _client;
 
-        public PackageSpecificationFileProcessor()
+        public PackageSpecificationFileProcessor(IGraphClient client)
         {
             _regex = new Regex(FilePattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            _client = client;
         }
 
         public string FilePattern => @"\.nuspec$";
@@ -27,10 +27,8 @@ namespace Backpack.DependencyMap.Processors
             return _regex.IsMatch(file);
         }
 
-        public void Process(string filePath, ITransactionalGraphClient client)
+        public void Process(string filePath)
         {
-            Log.InfoFormat("Processi[n]g file: {0}", filePath);
-
             var xml = XDocument.Load(filePath);
 
             // Get the project name
@@ -44,7 +42,7 @@ namespace Backpack.DependencyMap.Processors
                           xml.Descendants("id").FirstOrDefault();
             var packageId = package.Value;
 
-            client.Cypher
+            _client.Cypher
                 .Merge("(project:Project {name:{projectFile}})")
                 .Merge("(package:Package {name:{name}})")
                 .Merge("(project)-[:PUBLISHES]->(package)")
@@ -60,7 +58,7 @@ namespace Backpack.DependencyMap.Processors
                 var id = dependency.Attribute("id").Value;
                 var version = dependency.Attribute("version").Value;
 
-                client.Cypher
+                _client.Cypher
                     .Merge("(nuspec:Package {name:{packageId}})")
                     .Merge("(package:Package {name:{packageName}})")
                     .Merge("(nuspec)-[:DEPENDS_ON]->(package)")
@@ -72,7 +70,7 @@ namespace Backpack.DependencyMap.Processors
 
                 if (version != "$version$")
                 {
-                    client.Cypher
+                    _client.Cypher
                         .Merge("(nuspec:Package {name:{packageId}})")
                         .Merge("(packageVersion:PackageVersion {version:{packageVersion}, name:{packageName}})")
                         .Merge("(nuspec)-[:DEPENDS_ON]->(packageVersion)")

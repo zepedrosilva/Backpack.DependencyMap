@@ -3,6 +3,7 @@ using Fclp;
 using log4net;
 using log4net.Config;
 using StructureMap;
+using System.Reflection;
 
 namespace Backpack.DependencyMap
 {
@@ -15,7 +16,8 @@ namespace Backpack.DependencyMap
             XmlConfigurator.Configure();
 
             // Process arguments
-            Log.InfoFormat("Dependency map calculator, version {0}\n", "1.0");
+            var version = Assembly.GetExecutingAssembly().GetName().Version;
+            Log.InfoFormat("Dependency map calculator, version {0}\n", string.Format("{0}.{1}.{2}", version.Major, version.Minor, version.Revision));
 
             var parser = new FluentCommandLineParser<ApplicationArguments>();
 
@@ -65,7 +67,9 @@ namespace Backpack.DependencyMap
             if (!string.IsNullOrEmpty(arguments.Exclude))
                 Log.InfoFormat("Exclude: {0}", arguments.Exclude);
 
-            Log.InfoFormat("Recursive? {0}\n", arguments.Recursive);
+            Log.InfoFormat("Recursive? {0}", arguments.Recursive);
+
+            Log.InfoFormat("Clean up database? {0}\n", arguments.CleanDatabase);
 
             // Process the files and calculate the dependency map
 

@@ -1,6 +1,4 @@
-﻿using Neo4jClient.Transactions;
-
-namespace Backpack.DependencyMap.Processors
+﻿namespace Backpack.DependencyMap.Processors
 {
     public interface IProcessor
     {
@@ -8,6 +6,6 @@ namespace Backpack.DependencyMap.Processors
 
         bool IsProcessorFor(string file);
 
-        void Process(string filePath, ITransactionalGraphClient client);
+        void Process(string filePath);
     }
 }
